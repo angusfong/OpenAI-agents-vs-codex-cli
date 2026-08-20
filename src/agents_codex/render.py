@@ -80,19 +80,26 @@ class ConsoleRenderer:
                 return ApprovalAnswer(approved=False, feedback=feedback)
 
 
+def _get(obj, key):
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        return obj.get(key)
+    return getattr(obj, key, None)
+
+
 def describe_item(item) -> str:
+    # raw_item may be a pydantic wire object (mock/tests) or a plain dict
+    # (live Responses API), so read fields shape-agnostically.
     raw = getattr(item, "raw_item", None)
-    action = getattr(raw, "action", None)
-    commands = getattr(action, "commands", None) if action is not None else None
+    commands = _get(_get(raw, "action"), "commands")
     if commands:
         return "; ".join(commands)
-    operation = getattr(raw, "operation", None)
+    operation = _get(raw, "operation")
     if operation is not None:
-        op_type = getattr(operation, "type", "?")
-        path = getattr(operation, "path", "?")
-        return f"apply_patch {op_type} {path}"
-    name = getattr(raw, "name", None) or type(item).__name__
-    args = getattr(raw, "arguments", None)
+        return f"apply_patch {_get(operation, 'type') or '?'} {_get(operation, 'path') or '?'}"
+    name = _get(raw, "name") or type(item).__name__
+    args = _get(raw, "arguments")
     if isinstance(args, str) and len(args) < 120:
         return f"{name}({args})"
     return str(name)

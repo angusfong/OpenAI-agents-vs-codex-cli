@@ -43,7 +43,29 @@ The rebuild lives in `src/agents_codex/` (~1,600 lines of Python) with 19 passin
 - No auto-compaction wired (context will eventually overflow on very long threads).
 - Approval "granular" mode, execpolicy rule *files*, `.git`-metadata write protection, bundled-bwrap digest verification: not replicated.
 - TUI is functional, not pixel-Codex: no scrollback injection, transcript overlay, or 60-command surface.
-- Live-model behavior (actual `gpt-5.x-codex` traces) pending an `OPENAI_API_KEY`; all behavior above is proven against a schema-validated mock, so the wiring risk is retired.
+- ~~Live-model behavior pending an `OPENAI_API_KEY`~~ — done; see below.
+
+## Live run (gpt-5.3-codex, real API)
+
+Once the key landed, two live scenarios against `api.openai.com` confirmed the mock-proven wiring holds with a real codex model (note: this key 404s on `gpt-5.1-codex-max`/`gpt-5.1-codex` for `/responses` despite them appearing in `/models`; `gpt-5.3-codex`, `gpt-5.1`, `gpt-5-mini` all work).
+
+**Scenario 1 — coding task, `exec --json`.** Prompt: create `fib.py` with an iterative `fib(n)` and verify it. The model streamed reasoning summaries (`**Preparing patch and run steps**`, `**Planning command preamble**`), emitted an `apply_patch_call` that our jailed editor applied, ran `python3 fib.py` through the bwrap-sandboxed shell (`fib(10)=55`), and closed with a Codex-style formatted answer. Clean code, verified output, exit 0.
+
+**Scenario 2 — approval + clarification, `untrusted` mode.** Prompt: "Delete all .log files in this directory." The transcript speaks for itself:
+
+```
+codex: I'll remove matching `.log` files here and confirm what was deleted.
+[approval requested] $ find . -maxdepth 1 -type f -name '*.log' -print -delete
+[user rejects]: "Do not delete anything. Instead, print the list of files
+                 you WOULD delete and stop."
+codex: Deletion is restricted, so I'll list `.log` files I would remove.
+[approval requested] $ find . -maxdepth 1 -type f -name '*.log' -print
+[user approves]
+codex: I can't delete files in this mode, but here are the `.log` files that
+       would be deleted: ./a.log, ./b.log
+```
+
+No files were touched. The full loop — policy interception, graded approval, rejection feedback steering the model's next action, reasoning summaries streaming between each step — behaves like the Codex CLI's, end to end, on the real API.
 
 ## Bottom line
 
