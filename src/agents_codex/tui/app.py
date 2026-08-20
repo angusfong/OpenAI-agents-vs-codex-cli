@@ -34,21 +34,33 @@ SLASH_HELP = """\
 
 
 class ApprovalModal(ModalScreen[ApprovalAnswer]):
-    """Codex-style approval overlay: yes / always / prefix rule / no / feedback."""
+    """Codex-style approval overlay: yes / always / prefix rule / no / feedback.
+
+    The feedback Input stays hidden (and unfocused) until `f` is pressed, so
+    the y/a/p/n keys always reach the screen bindings instead of being typed
+    into a focused text field.
+    """
+
+    AUTO_FOCUS = ""  # never auto-focus the hidden feedback Input
+    # (in Textual, None inherits the App's "*"; empty string disables)
 
     BINDINGS = [
+        # Letter keys are plain bindings: they fire while focus is on the
+        # screen (the default here) and type normally once the feedback
+        # Input takes focus. Only escape overrides the Input.
         Binding("y", "answer('yes')", "yes"),
         Binding("a", "answer('always')", "always for session"),
-        Binding("p", "answer('prefix')", "yes + don't ask for this prefix"),
+        Binding("p", "answer('prefix')", "yes + prefix rule"),
         Binding("n", "answer('no')", "no"),
         Binding("f", "answer('feedback')", "no, with guidance"),
-        Binding("escape", "answer('no')", "reject"),
+        Binding("escape", "answer('no')", "reject", priority=True),
     ]
 
     def __init__(self, title: str, detail: str):
         super().__init__()
         self._title = title
         self._detail = detail
+        self._feedback_mode = False
 
     def compose(self) -> ComposeResult:
         box = Vertical(id="approval-box")
@@ -58,15 +70,33 @@ class ApprovalModal(ModalScreen[ApprovalAnswer]):
             yield Static(
                 Text(
                     "[y] yes   [a] yes, for this session   [p] yes + prefix rule\n"
-                    "[n] no    [f] no, and tell the agent what to do differently",
+                    "[n] no    [f] no, and tell the agent what to do differently\n"
+                    "[esc] reject",
                     style="dim",
-                )
+                ),
+                id="approval-options",
             )
-            yield Input(placeholder="feedback (press f first)…", id="feedback-input")
+            feedback = Input(
+                placeholder="What should the agent do instead? (enter to send)",
+                id="feedback-input",
+            )
+            feedback.display = False
+            yield feedback
+
+    def on_mount(self) -> None:
+        # Keep focus on the screen itself so the letter bindings fire.
+        self.set_focus(None)
 
     def action_answer(self, choice: str) -> None:
         if choice == "feedback":
-            self.query_one("#feedback-input", Input).focus()
+            self._feedback_mode = True
+            feedback = self.query_one("#feedback-input", Input)
+            feedback.display = True
+            feedback.focus()
+            return
+        if self._feedback_mode and choice != "no":
+            # y/a/p while typing feedback are literal characters; only
+            # escape (choice == "no") still cancels out of feedback mode.
             return
         self.dismiss(
             {
@@ -78,7 +108,8 @@ class ApprovalModal(ModalScreen[ApprovalAnswer]):
         )
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        self.dismiss(ApprovalAnswer(approved=False, feedback=event.value or None))
+        text = event.value.strip()
+        self.dismiss(ApprovalAnswer(approved=False, feedback=text or None))
 
 
 class TuiRenderer:
@@ -97,6 +128,7 @@ class TuiRenderer:
 class CodexTui(App):
     CSS = """
     #transcript { height: 1fr; padding: 0 1; }
+    #live { max-height: 6; padding: 0 1; color: $text-muted; }
     #status { height: 1; background: $surface; color: $text-muted; padding: 0 1; }
     #composer { dock: bottom; }
     #approval-box { width: 80%; max-height: 80%; border: round yellow;
@@ -111,8 +143,12 @@ class CodexTui(App):
         self.session = CodexSession(cfg=cfg, thread_id=thread_id)
         self.initial_prompt = initial_prompt
         self._busy = False
-        self._reasoning_open = False
-        self._answer_open = False
+        # Delta streams are buffered here and rendered in the live cell;
+        # whole blocks are committed to the transcript when an item completes
+        # (RichLog appends a new line per write, so writing per-delta would
+        # explode one word per line).
+        self._reasoning_buf = ""
+        self._answer_buf = ""
         self.tokens_in = 0
         self.tokens_out = 0
 
@@ -120,6 +156,9 @@ class CodexTui(App):
 
     def compose(self) -> ComposeResult:
         yield RichLog(id="transcript", wrap=True, markup=False, highlight=False)
+        live = Static(id="live")
+        live.display = False
+        yield live
         yield Static(id="status")
         yield Input(placeholder="Ask agents-codex… (/help for commands)", id="composer")
         yield Footer()
@@ -145,33 +184,72 @@ class CodexTui(App):
 
     # -- events from the engine -------------------------------------------
 
+    def _update_live(self) -> None:
+        live = self.query_one("#live", Static)
+        parts = []
+        if self._reasoning_buf:
+            tail = self._reasoning_buf.replace("**", "").strip()[-300:]
+            parts.append(Text(f"thinking  {tail}", style="dim italic"))
+        if self._answer_buf:
+            parts.append(Text(self._answer_buf[-600:]))
+        if parts:
+            live.display = True
+            combined = Text("\n").join(parts) if len(parts) > 1 else parts[0]
+            live.update(combined)
+        else:
+            live.display = False
+            live.update("")
+
+    def _commit_reasoning(self) -> None:
+        if not self._reasoning_buf:
+            return
+        log = self.query_one("#transcript", RichLog)
+        text = self._reasoning_buf.replace("**", "").strip()
+        log.write(Text("\nthinking", style="bold dim"))
+        log.write(Text(text, style="dim italic"), scroll_end=True)
+        self._reasoning_buf = ""
+        self._update_live()
+
+    def _commit_answer(self) -> None:
+        if not self._answer_buf:
+            return
+        log = self.query_one("#transcript", RichLog)
+        log.write(Text("\ncodex", style="bold magenta"))
+        log.write(Text(self._answer_buf.strip()), scroll_end=True)
+        self._answer_buf = ""
+        self._update_live()
+
     def handle_stream_event(self, event) -> None:
         log = self.query_one("#transcript", RichLog)
         if event.type == "raw_response_event":
             data = event.data
             if data.type == "response.reasoning_summary_text.delta":
-                if not self._reasoning_open:
-                    log.write(Text("thinking", style="bold dim"))
-                    self._reasoning_open = True
-                log.write(Text(data.delta, style="dim italic"), scroll_end=True)
+                self._reasoning_buf += data.delta
+                self._update_live()
                 self._refresh_status("thinking…")
             elif data.type == "response.output_text.delta":
-                if not self._answer_open:
-                    log.write(Text("\ncodex", style="bold magenta"))
-                    self._answer_open = True
-                    self._reasoning_open = False
-                log.write(Text(data.delta), scroll_end=True)
+                self._answer_buf += data.delta
+                self._update_live()
+            elif data.type == "response.output_item.done":
+                item_type = getattr(data.item, "type", None) or (
+                    data.item.get("type") if isinstance(data.item, dict) else None
+                )
+                if item_type == "reasoning":
+                    self._commit_reasoning()
+                elif item_type == "message":
+                    self._commit_answer()
             elif data.type == "response.completed":
                 usage = getattr(data.response, "usage", None)
                 if usage:
                     self.tokens_in += usage.input_tokens
                     self.tokens_out += usage.output_tokens
-                self._answer_open = False
-                self._reasoning_open = False
+                # Flush anything the item.done events didn't cover.
+                self._commit_reasoning()
+                self._commit_answer()
                 self._refresh_status()
         elif event.type == "run_item_stream_event":
             if event.name == "tool_called":
-                self._reasoning_open = False
+                self._commit_reasoning()
                 log.write(Text(f"\nexec {describe_item(event.item)}", style="bold cyan"))
             elif event.name == "tool_output":
                 output = str(getattr(event.item, "output", "")).strip()
@@ -208,8 +286,8 @@ class CodexTui(App):
             log.write(Text(f"error: {exc}", style="bold red"))
         finally:
             self._busy = False
-            self._reasoning_open = False
-            self._answer_open = False
+            self._commit_reasoning()
+            self._commit_answer()
             self._refresh_status()
 
     # -- slash commands ----------------------------------------------------
