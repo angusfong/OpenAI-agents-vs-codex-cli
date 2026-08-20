@@ -21,7 +21,7 @@ Branch: `claude/openai-codex-cli-rebuild-8answc`. This file is the resume point:
 - [x] Phase 2: Textual TUI + MCP client
 - [x] Phase 2: mock Responses API harness + e2e tests — 19 tests green, no key needed
 - [x] docs/comparison.md + README
-- [ ] Publish reports as artifacts
+- [x] Publish reports as artifacts (https://claude.ai/code/artifact/e933039e-4ab2-4f92-aef5-3f2ad7c6f085)
 - [ ] LIVE runs once OPENAI_API_KEY appears (check `printenv OPENAI_API_KEY` each wake): run `agents-codex exec` + TUI scenarios against api.openai.com, capture real reasoning traces, append findings to docs/comparison.md ("Live run" section)
 
 ## Rules for resumed sessions
