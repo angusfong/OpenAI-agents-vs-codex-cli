@@ -175,6 +175,16 @@ class MockResponsesServer:
                     "timeout_ms": 20000,
                 },
             }
+        elif stage.kind == "function":
+            name, arguments = stage.payload
+            item = {
+                "type": "function_call",
+                "id": f"fc_{n}",
+                "call_id": f"call_fc_{n}",
+                "status": "completed",
+                "name": name,
+                "arguments": arguments,
+            }
         elif stage.kind == "apply_patch":
             item = {
                 "type": "apply_patch_call",
