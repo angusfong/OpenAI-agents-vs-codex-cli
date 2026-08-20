@@ -11,16 +11,18 @@ Branch: `claude/openai-codex-cli-rebuild-8answc`. This file is the resume point:
 
 ## Progress
 - [x] Clone openai/codex and openai/openai-agents-python to /workspace/openai/ (re-clone if container was recycled; anonymous git reads work through the proxy)
-- [ ] Phase 1: compile codex-cli (`cargo build -p codex-cli --profile dev-small` in /workspace/openai/codex/codex-rs; log in scratchpad codex-build.log)
-- [ ] Phase 1: dissection notes in docs/notes/{codex-core,codex-ux,agents-sdk}.md (3 background agents writing these)
-- [ ] Phase 1: docs/phase1-feasibility.md
-- [ ] Phase 2: scaffold `agents_codex` Python package
-- [ ] Phase 2: tools (shell, apply_patch, update_plan) + tests
-- [ ] Phase 2: approval modes + sandboxing (landlock/seccomp attempt, fallback documented)
-- [ ] Phase 2: reasoning-trace streaming, sessions/resume, AGENTS.md, slash commands, exec mode
-- [ ] Phase 2: Textual TUI + MCP client
-- [ ] Phase 2: mock Responses API harness + e2e tests (live tests pending key)
-- [ ] docs/comparison.md + final artifacts + final push
+- [x] Phase 1: compile codex-cli — SUCCESS, 1011 crates; its sandbox verified working after `apt-get install bubblewrap`
+- [x] Phase 1: dissection notes in docs/notes/{codex-core,codex-ux,agents-sdk}.md
+- [x] Phase 1: docs/phase1-feasibility.md
+- [x] Phase 2: scaffold `agents_codex` Python package
+- [x] Phase 2: tools (shell, apply_patch, update_plan) + tests
+- [x] Phase 2: approval modes + sandboxing (bwrap works in-container; Landlock ENOSYS, fallback documented)
+- [x] Phase 2: reasoning-trace streaming, sessions/resume, AGENTS.md, slash commands, exec mode
+- [x] Phase 2: Textual TUI + MCP client
+- [x] Phase 2: mock Responses API harness + e2e tests — 19 tests green, no key needed
+- [x] docs/comparison.md + README
+- [ ] Publish reports as artifacts
+- [ ] LIVE runs once OPENAI_API_KEY appears (check `printenv OPENAI_API_KEY` each wake): run `agents-codex exec` + TUI scenarios against api.openai.com, capture real reasoning traces, append findings to docs/comparison.md ("Live run" section)
 
 ## Rules for resumed sessions
 - Commit + push after each completed checklist item (small, descriptive commits).
